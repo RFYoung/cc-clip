@@ -225,6 +225,80 @@ func TestInstall_ReinstallOverCcWrapper(t *testing.T) {
 	}
 }
 
+func TestInstall_SidecarCollision_RegularFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("bash-based install path is Linux-only")
+	}
+	home, binDir := setupFakeHome(t)
+
+	// Native installer layout (symlink origin).
+	versionsDir := filepath.Join(home, ".local", "share", "claude", "versions")
+	if err := os.MkdirAll(versionsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(versionsDir, "2.1.132")
+	if err := os.WriteFile(target, []byte("real binary"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(binDir, "claude")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Stale sidecar from a prior half-install.
+	sidecar := filepath.Join(binDir, "claude.cc-clip-real")
+	if err := os.WriteFile(sidecar, []byte("STALE"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &localSession{home: home}
+	err := InstallRemoteClaudeWrapper(s, 18339)
+	if err == nil {
+		t.Fatal("expected install to refuse with collision; got nil")
+	}
+	if !strings.Contains(err.Error(), "claude.cc-clip-real already exists") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Origin must be untouched.
+	info, err := os.Lstat(filepath.Join(binDir, "claude"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("origin symlink was disturbed despite collision refusal")
+	}
+}
+
+func TestInstall_SidecarCollision_Directory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("bash-based install path is Linux-only")
+	}
+	home, binDir := setupFakeHome(t)
+
+	if err := os.WriteFile(filepath.Join(binDir, "claude"), []byte("regular"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Sidecar PATH is a directory — would have been the silent-corruption footgun.
+	sidecarDir := filepath.Join(binDir, "claude.cc-clip-real")
+	if err := os.Mkdir(sidecarDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &localSession{home: home}
+	err := InstallRemoteClaudeWrapper(s, 18339)
+	if err == nil {
+		t.Fatal("expected install to refuse on directory at sidecar path")
+	}
+	// CRITICAL: origin must NOT have been moved into the directory.
+	if _, statErr := os.Stat(filepath.Join(sidecarDir, "claude")); statErr == nil {
+		t.Fatal("FOOTGUN: claude was moved into the directory; collision guard failed")
+	}
+	// Origin must still be at the original location.
+	if _, err := os.Lstat(filepath.Join(binDir, "claude")); err != nil {
+		t.Fatal("origin claude is missing; collision guard failed to short-circuit")
+	}
+}
+
 func TestInstall_SymlinkOrigin_NativeInstallerLayout(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink semantics differ on Windows")
