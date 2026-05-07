@@ -517,11 +517,25 @@ func cmdConnect() {
 	if len(os.Args) < 3 {
 		log.Fatal("usage: cc-clip connect <host> [--port PORT] [--force] [--token-only] [--no-notify]")
 	}
+	autoRecover := hasFlag("auto-recover")
+	tokenOnly := hasFlag("token-only")
+	if autoRecover && tokenOnly {
+		fmt.Fprintln(os.Stderr, `error: --auto-recover cannot be combined with --token-only
+       --auto-recover performs recovery and full reinstall.
+       Re-run without --token-only:
+           cc-clip connect <host> --auto-recover
+       Or, if you only want to recover the binary without reinstalling the
+       wrapper, run the manual recovery and then cc-clip connect --token-only:
+           ssh <host> 'mv ~/.local/bin/claude.cc-clip-bak "$(readlink -f ~/.local/bin/claude)"'
+           cc-clip connect <host> --token-only`)
+		os.Exit(2)
+	}
+	_ = autoRecover // consumed in T16 (N0 wiring)
 	runConnect(connectOpts{
 		host:      os.Args[2],
 		port:      getPort(),
 		force:     hasFlag("force"),
-		tokenOnly: hasFlag("token-only"),
+		tokenOnly: tokenOnly,
 		codex:     hasFlag("codex"),
 		noNotify:  hasFlag("no-notify"),
 	})
