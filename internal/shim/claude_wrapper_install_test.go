@@ -96,6 +96,54 @@ func TestClassifyClaudeBin_Symlink(t *testing.T) {
 	}
 }
 
+func TestInstall_RegularFileOrigin(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("bash-based install path is Linux-only")
+	}
+	home, binDir := setupFakeHome(t)
+	originalContent := []byte("\x7fELF... pretend this is the real 250MB claude binary")
+	if err := os.WriteFile(filepath.Join(binDir, "claude"), originalContent, 0755); err != nil {
+		t.Fatal(err)
+	}
+	s := &localSession{home: home}
+
+	if err := InstallRemoteClaudeWrapper(s, 18339); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+
+	// Sidecar must hold the original (verbatim).
+	sidecar, err := os.ReadFile(filepath.Join(binDir, "claude.cc-clip-real"))
+	if err != nil {
+		t.Fatalf("sidecar missing: %v", err)
+	}
+	if string(sidecar) != string(originalContent) {
+		t.Fatal("sidecar does not contain original content (mv may have leaked or content was rewritten)")
+	}
+
+	// claude must now be the wrapper.
+	data, err := os.ReadFile(filepath.Join(binDir, "claude"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "# cc-clip claude wrapper") {
+		t.Fatal("claude is not the cc-clip wrapper after install")
+	}
+	// Port-substitution assertion (per T6 review note): wrapper must reference
+	// the port we passed to InstallRemoteClaudeWrapper.
+	if !strings.Contains(string(data), "18339") {
+		t.Fatal("installed wrapper does not contain expected port 18339")
+	}
+
+	// claude must be a regular file (not a symlink).
+	info, err := os.Lstat(filepath.Join(binDir, "claude"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("claude should be a regular file after install")
+	}
+}
+
 func TestInstall_NoPriorInstall(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("bash-based install path is Linux-only")

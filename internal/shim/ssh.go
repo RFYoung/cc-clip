@@ -305,8 +305,10 @@ func InstallRemoteClaudeWrapper(s SessionExecutor, port int) error {
 	switch kind {
 	case claudeBinNone:
 		return installWrapperNoOrigin(s, port)
+	case claudeBinRegular, claudeBinSymlink:
+		return installWrapperWithSidecar(s, port)
 	default:
-		return fmt.Errorf("install: unsupported origin kind %q (more branches added in later tasks)", kind)
+		return fmt.Errorf("install: unsupported origin kind %q", kind)
 	}
 }
 
@@ -322,6 +324,48 @@ mv "$tmp" "$HOME/.local/bin/claude"`
 	out, err := s.ExecWithStdin(cmd, strings.NewReader(script))
 	if err != nil {
 		return fmt.Errorf("install (none): %s: %w", strings.TrimSpace(out), err)
+	}
+	return nil
+}
+
+// installWrapperWithSidecar handles the regular-file and symlink origin kinds:
+// stage the origin to ~/.local/bin/claude.cc-clip-real, then commit the wrapper.
+// Uses prepare-then-commit ordering so failures before the final mv leave the
+// user's claude untouched, and failures after staging trigger a best-effort
+// rollback that restores the origin.
+//
+// Pre-flight refuses if the sidecar path already exists (regular file, symlink,
+// or directory). The user must remove a stale sidecar manually before re-running.
+// Refusing rather than overwriting avoids the silent-corruption footgun where
+// the sidecar path is a directory and `mv claude .cc-clip-real` would move
+// claude INTO the directory rather than rename to it.
+func installWrapperWithSidecar(s SessionExecutor, port int) error {
+	// Pre-flight: refuse if sidecar already exists.
+	out, _ := s.Exec(`if test -e "$HOME/.local/bin/claude.cc-clip-real" || test -L "$HOME/.local/bin/claude.cc-clip-real"; then echo conflict; fi`)
+	if strings.TrimSpace(out) == "conflict" {
+		return fmt.Errorf("install: ~/.local/bin/claude.cc-clip-real already exists; remove it manually and re-run")
+	}
+
+	script := ClaudeWrapperScript(port)
+	cmd := `set -e
+mkdir -p "$HOME/.local/bin"
+tmp=$(mktemp "$HOME/.local/bin/.claude.cc-clip-tmp.XXXXXX")
+trap 'rm -f "$tmp"' EXIT
+cat > "$tmp"
+chmod +x "$tmp"
+# Stage origin to sidecar (mv on a symlink renames the link itself,
+# never reads/writes through it).
+mv "$HOME/.local/bin/claude" "$HOME/.local/bin/claude.cc-clip-real"
+# Commit wrapper.
+if ! mv "$tmp" "$HOME/.local/bin/claude"; then
+    # Best-effort rollback: restore origin so user's claude keeps working.
+    mv "$HOME/.local/bin/claude.cc-clip-real" "$HOME/.local/bin/claude" 2>/dev/null || true
+    exit 1
+fi
+trap - EXIT  # tmp now consumed by the mv`
+	outErr, err := s.ExecWithStdin(cmd, strings.NewReader(script))
+	if err != nil {
+		return fmt.Errorf("install (with-sidecar): %s: %w", strings.TrimSpace(outErr), err)
 	}
 	return nil
 }
