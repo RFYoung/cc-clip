@@ -498,6 +498,30 @@ echo other`)
 	return strings.TrimSpace(out), nil
 }
 
+// RecoverV070Corruption migrates the v0.7.0 backup file (which contains the
+// real claude binary) back to the symlink's target path, restoring the
+// original Native Installer layout. After this call, the caller is expected
+// to re-run InstallRemoteClaudeWrapper to install a v0.7.1+ wrapper safely.
+//
+// This function re-verifies all five corruption conditions inside the same
+// SSH session before doing anything destructive (TOCTOU guard).
+func RecoverV070Corruption(s SessionExecutor) error {
+	corrupted, err := DetectV070Corruption(s)
+	if err != nil {
+		return fmt.Errorf("recover: re-detection failed: %w", err)
+	}
+	if !corrupted {
+		return fmt.Errorf("recover: corruption no longer detected; refusing to migrate backup")
+	}
+	out, err := s.Exec(`set -e
+target=$(readlink -f "$HOME/.local/bin/claude")
+mv "$HOME/.local/bin/claude.cc-clip-bak" "$target"`)
+	if err != nil {
+		return fmt.Errorf("recover: migrate backup: %s: %w", strings.TrimSpace(out), err)
+	}
+	return nil
+}
+
 // DetectV070Corruption returns true when the remote exhibits the exact
 // filesystem state produced by v0.7.0's buggy InstallRemoteClaudeWrapper:
 //

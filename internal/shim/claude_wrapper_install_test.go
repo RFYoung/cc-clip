@@ -608,3 +608,58 @@ func TestDetectV070_SymlinkTargetNotWrapper(t *testing.T) {
 		t.Fatal("expected corrupted=false when symlink target is a real binary (C2 must fail)")
 	}
 }
+
+func TestRecoverV070_HappyPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on Windows")
+	}
+	home, binDir := setupFakeHome(t)
+	makeV070Corruption(t, home)
+
+	target := filepath.Join(home, ".local", "share", "claude", "versions", "2.1.132")
+	bakBefore, _ := os.ReadFile(filepath.Join(binDir, "claude.cc-clip-bak"))
+
+	s := &localSession{home: home}
+	if err := RecoverV070Corruption(s); err != nil {
+		t.Fatalf("recover: %v", err)
+	}
+
+	// After recovery: target file content == backup content (real binary restored).
+	targetAfter, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(targetAfter) != string(bakBefore) {
+		t.Fatal("target content does not match backup; recovery failed")
+	}
+
+	// Backup file must be gone (mv consumed it).
+	if _, err := os.Lstat(filepath.Join(binDir, "claude.cc-clip-bak")); !os.IsNotExist(err) {
+		t.Fatal("backup file lingered after recovery")
+	}
+
+	// Symlink must still exist and still point at target.
+	info, err := os.Lstat(filepath.Join(binDir, "claude"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("claude is no longer a symlink after recovery")
+	}
+}
+
+func TestRecoverV070_RefusesIfNotCorrupted(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("bash-based install path is Linux-only")
+	}
+	home, binDir := setupFakeHome(t)
+	if err := os.WriteFile(filepath.Join(binDir, "claude"), []byte("regular"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &localSession{home: home}
+	err := RecoverV070Corruption(s)
+	if err == nil {
+		t.Fatal("expected recovery to refuse when no corruption is detected")
+	}
+}
