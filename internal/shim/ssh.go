@@ -497,3 +497,42 @@ echo other`)
 	}
 	return strings.TrimSpace(out), nil
 }
+
+// DetectV070Corruption returns true when the remote exhibits the exact
+// filesystem state produced by v0.7.0's buggy InstallRemoteClaudeWrapper:
+//
+//   C1: ~/.local/bin/claude is a symlink.
+//   C2: The symlink target's first 256 bytes contain the cc-clip wrapper marker.
+//   C3: ~/.local/bin/claude.cc-clip-bak exists as a regular file.
+//   C4: That backup is larger than 1 MiB.
+//   C5: That backup is NOT itself a cc-clip wrapper (guards against a double-
+//       install pathology where both target and backup are wrappers).
+//
+// All five conditions must be true to return corrupted=true. The check is
+// strictly read-only — nothing is modified.
+func DetectV070Corruption(s SessionExecutor) (bool, error) {
+	out, err := s.Exec(`set -e
+claude="$HOME/.local/bin/claude"
+bak="$HOME/.local/bin/claude.cc-clip-bak"
+# C1: claude is a symlink.
+[ -L "$claude" ] || { echo notcorrupted; exit 0; }
+# C2: target contains wrapper marker.
+target=$(readlink -f "$claude") || { echo notcorrupted; exit 0; }
+[ -f "$target" ] || { echo notcorrupted; exit 0; }
+head -c 256 "$target" 2>/dev/null | grep -qF "# cc-clip claude wrapper" || { echo notcorrupted; exit 0; }
+# C3: backup is a regular file.
+[ -f "$bak" ] || { echo notcorrupted; exit 0; }
+# C4: backup > 1 MiB.
+size=$(wc -c < "$bak" | tr -d ' ')
+[ "$size" -gt 1048576 ] || { echo notcorrupted; exit 0; }
+# C5: backup is NOT a wrapper.
+if head -c 256 "$bak" 2>/dev/null | grep -qF "# cc-clip claude wrapper"; then
+    echo notcorrupted
+    exit 0
+fi
+echo corrupted`)
+	if err != nil {
+		return false, fmt.Errorf("detect v0.7.0 corruption: %w", err)
+	}
+	return strings.TrimSpace(out) == "corrupted", nil
+}

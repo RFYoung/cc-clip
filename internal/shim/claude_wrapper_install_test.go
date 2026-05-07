@@ -455,3 +455,156 @@ func TestInstall_MktempDoesNotFollowSymlinks(t *testing.T) {
 		t.Fatal("sensitive file was modified — mktemp may not be in use")
 	}
 }
+
+// makeV070Corruption sets up the exact filesystem state issue #55 describes:
+// symlink at ~/.local/bin/claude points at versions/X.Y.Z, that file is now
+// a cc-clip wrapper, and ~/.local/bin/claude.cc-clip-bak holds the real binary.
+func makeV070Corruption(t *testing.T, home string) {
+	t.Helper()
+	binDir := filepath.Join(home, ".local", "bin")
+	versionsDir := filepath.Join(home, ".local", "share", "claude", "versions")
+	if err := os.MkdirAll(versionsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(versionsDir, "2.1.132")
+	// versions/X.Y.Z is a cc-clip wrapper (the bug).
+	if err := os.WriteFile(target, []byte(ClaudeWrapperScript(18339)), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// claude is the symlink, untouched.
+	if err := os.Symlink(target, filepath.Join(binDir, "claude")); err != nil {
+		t.Fatal(err)
+	}
+	// .cc-clip-bak holds the original 5MB ELF.
+	realBinary := make([]byte, 5*1024*1024)
+	for i := range realBinary {
+		realBinary[i] = byte(i % 251)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "claude.cc-clip-bak"), realBinary, 0755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDetectV070_CorruptedState(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on Windows")
+	}
+	home, _ := setupFakeHome(t)
+	makeV070Corruption(t, home)
+
+	s := &localSession{home: home}
+	corrupted, err := DetectV070Corruption(s)
+	if err != nil {
+		t.Fatalf("detect: %v", err)
+	}
+	if !corrupted {
+		t.Fatal("expected corrupted=true on canonical v0.7.0 state")
+	}
+}
+
+func TestDetectV070_NotSymlinkOrigin(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("bash-based install path is Linux-only")
+	}
+	home, binDir := setupFakeHome(t)
+	if err := os.WriteFile(filepath.Join(binDir, "claude"), []byte("regular"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Even with a .cc-clip-bak, C1 fails (not symlink).
+	if err := os.WriteFile(filepath.Join(binDir, "claude.cc-clip-bak"), make([]byte, 5*1024*1024), 0755); err != nil {
+		t.Fatal(err)
+	}
+	s := &localSession{home: home}
+	corrupted, err := DetectV070Corruption(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if corrupted {
+		t.Fatal("expected corrupted=false when origin is regular file (C1 must fail)")
+	}
+}
+
+func TestDetectV070_BackupMissing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on Windows")
+	}
+	home, binDir := setupFakeHome(t)
+	versionsDir := filepath.Join(home, ".local", "share", "claude", "versions")
+	if err := os.MkdirAll(versionsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(versionsDir, "2.1.132")
+	if err := os.WriteFile(target, []byte(ClaudeWrapperScript(18339)), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(binDir, "claude")); err != nil {
+		t.Fatal(err)
+	}
+	// No .cc-clip-bak.
+	s := &localSession{home: home}
+	corrupted, err := DetectV070Corruption(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if corrupted {
+		t.Fatal("expected corrupted=false when backup is missing (C3 must fail)")
+	}
+}
+
+func TestDetectV070_BackupIsAlsoWrapper(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on Windows")
+	}
+	home, binDir := setupFakeHome(t)
+	versionsDir := filepath.Join(home, ".local", "share", "claude", "versions")
+	if err := os.MkdirAll(versionsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(versionsDir, "2.1.132")
+	if err := os.WriteFile(target, []byte(ClaudeWrapperScript(18339)), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(binDir, "claude")); err != nil {
+		t.Fatal(err)
+	}
+	// Backup is also a wrapper. Pad to >1MB so C4 passes.
+	bakContent := append([]byte(ClaudeWrapperScript(18339)), make([]byte, 2*1024*1024)...)
+	if err := os.WriteFile(filepath.Join(binDir, "claude.cc-clip-bak"), bakContent, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &localSession{home: home}
+	corrupted, err := DetectV070Corruption(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if corrupted {
+		t.Fatal("expected corrupted=false when backup itself is a wrapper (C5 must fail)")
+	}
+}
+
+func TestDetectV070_SymlinkTargetNotWrapper(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on Windows")
+	}
+	home, binDir := setupFakeHome(t)
+	versionsDir := filepath.Join(home, ".local", "share", "claude", "versions")
+	if err := os.MkdirAll(versionsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(versionsDir, "2.1.132")
+	if err := os.WriteFile(target, []byte("\x7fELF... regular real binary"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(binDir, "claude")); err != nil {
+		t.Fatal(err)
+	}
+	s := &localSession{home: home}
+	corrupted, err := DetectV070Corruption(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if corrupted {
+		t.Fatal("expected corrupted=false when symlink target is a real binary (C2 must fail)")
+	}
+}
