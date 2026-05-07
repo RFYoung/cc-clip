@@ -181,3 +181,77 @@ func TestInstall_NoPriorInstall(t *testing.T) {
 		t.Fatal("installed file is not the cc-clip wrapper")
 	}
 }
+
+func TestInstall_SymlinkOrigin_NativeInstallerLayout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on Windows")
+	}
+	home, binDir := setupFakeHome(t)
+
+	// Build Native Installer layout:
+	//   ~/.local/bin/claude -> ~/.local/share/claude/versions/2.1.132
+	//   ~/.local/share/claude/versions/2.1.132 = real binary (5MB random)
+	versionsDir := filepath.Join(home, ".local", "share", "claude", "versions")
+	if err := os.MkdirAll(versionsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(versionsDir, "2.1.132")
+	realBinary := make([]byte, 5*1024*1024)
+	for i := range realBinary {
+		realBinary[i] = byte(i % 251) // pseudo-random; large enough to be distinguishable
+	}
+	if err := os.WriteFile(target, realBinary, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(binDir, "claude")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Snapshot the real binary content before install.
+	pre, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := &localSession{home: home}
+	if err := InstallRemoteClaudeWrapper(s, 18339); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+
+	// CRITICAL: real binary in versions store must be byte-identical to before.
+	// This is the issue #55 regression assertion — the original v0.7.0 bug had
+	// the wrapper written THROUGH the symlink to this very file.
+	post, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("real binary disappeared: %v", err)
+	}
+	if string(pre) != string(post) {
+		t.Fatal("REGRESSION: real claude binary was modified during install (issue #55 root bug)")
+	}
+
+	// Sidecar must be the symlink itself, still pointing at versions/2.1.132.
+	sidecar := filepath.Join(binDir, "claude.cc-clip-real")
+	info, err := os.Lstat(sidecar)
+	if err != nil {
+		t.Fatalf("sidecar missing: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("sidecar should be a symlink (origin was a symlink)")
+	}
+	resolved, err := os.Readlink(sidecar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != target {
+		t.Fatalf("sidecar target: got %q, want %q", resolved, target)
+	}
+
+	// Wrapper must be a regular file at claude path.
+	wrapperInfo, err := os.Lstat(filepath.Join(binDir, "claude"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wrapperInfo.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("claude should be a regular file after install (the wrapper)")
+	}
+}
