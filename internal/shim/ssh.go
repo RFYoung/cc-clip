@@ -522,6 +522,53 @@ mv "$HOME/.local/bin/claude.cc-clip-bak" "$target"`)
 	return nil
 }
 
+// UninstallRemoteClaudeWrapper removes the cc-clip claude wrapper from
+// ~/.local/bin/claude and restores the origin from ~/.local/bin/claude.cc-clip-real.
+//
+// Safety: refuses if ~/.local/bin/claude is not a cc-clip wrapper (i.e. the
+// user replaced it with their own file). In that case, returns an error
+// without touching anything.
+//
+// If a v0.7.0-era ~/.local/bin/claude.cc-clip-bak file exists, it is left
+// in place — recovery of that backup is the user's call (see
+// RecoverV070Corruption + --auto-recover).
+func UninstallRemoteClaudeWrapper(s SessionExecutor) error {
+	// Verify file at claude is a cc-clip wrapper (and exists).
+	out, err := s.Exec(`p="$HOME/.local/bin/claude"
+if [ ! -e "$p" ] && [ ! -L "$p" ]; then echo absent; exit 0; fi
+if [ -L "$p" ] || [ ! -f "$p" ]; then echo notwrapper; exit 0; fi
+if head -c 256 "$p" 2>/dev/null | grep -qF "# cc-clip claude wrapper"; then
+    echo wrapper
+else
+    echo notwrapper
+fi`)
+	if err != nil {
+		return fmt.Errorf("uninstall: classify failed: %w", err)
+	}
+	switch strings.TrimSpace(out) {
+	case "absent":
+		return nil
+	case "notwrapper":
+		return fmt.Errorf("uninstall: ~/.local/bin/claude is not a cc-clip wrapper; refusing to remove")
+	case "wrapper":
+		// proceed
+	default:
+		return fmt.Errorf("uninstall: unexpected classify output %q", strings.TrimSpace(out))
+	}
+
+	// Remove wrapper, restore origin from sidecar if present.
+	cmd := `set -e
+rm "$HOME/.local/bin/claude"
+if [ -e "$HOME/.local/bin/claude.cc-clip-real" ] || [ -L "$HOME/.local/bin/claude.cc-clip-real" ]; then
+    mv "$HOME/.local/bin/claude.cc-clip-real" "$HOME/.local/bin/claude"
+fi`
+	outErr, err := s.Exec(cmd)
+	if err != nil {
+		return fmt.Errorf("uninstall: %s: %w", strings.TrimSpace(outErr), err)
+	}
+	return nil
+}
+
 // DetectV070Corruption returns true when the remote exhibits the exact
 // filesystem state produced by v0.7.0's buggy InstallRemoteClaudeWrapper:
 //

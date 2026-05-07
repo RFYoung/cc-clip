@@ -663,3 +663,112 @@ func TestRecoverV070_RefusesIfNotCorrupted(t *testing.T) {
 		t.Fatal("expected recovery to refuse when no corruption is detected")
 	}
 }
+
+func TestUninstall_SymlinkOrigin(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on Windows")
+	}
+	home, binDir := setupFakeHome(t)
+	versionsDir := filepath.Join(home, ".local", "share", "claude", "versions")
+	if err := os.MkdirAll(versionsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(versionsDir, "2.1.132")
+	realBinary := []byte("real claude binary content, ~5MB pretend")
+	if err := os.WriteFile(target, realBinary, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(binDir, "claude")); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &localSession{home: home}
+	if err := InstallRemoteClaudeWrapper(s, 18339); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if err := UninstallRemoteClaudeWrapper(s); err != nil {
+		t.Fatalf("uninstall: %v", err)
+	}
+
+	// claude must be a symlink again, pointing at the original target.
+	info, err := os.Lstat(filepath.Join(binDir, "claude"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("claude is not a symlink after uninstall")
+	}
+	resolved, err := os.Readlink(filepath.Join(binDir, "claude"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != target {
+		t.Fatalf("symlink target: got %q, want %q", resolved, target)
+	}
+	// Real binary intact (was never touched).
+	pre, _ := os.ReadFile(target)
+	if string(pre) != string(realBinary) {
+		t.Fatal("real binary corrupted")
+	}
+	// Sidecar must be gone.
+	if _, err := os.Lstat(filepath.Join(binDir, "claude.cc-clip-real")); !os.IsNotExist(err) {
+		t.Fatal("sidecar lingered after uninstall")
+	}
+}
+
+func TestUninstall_RegularFileOrigin(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("bash-based install path is Linux-only")
+	}
+	home, binDir := setupFakeHome(t)
+	original := []byte("ORIGINAL")
+	if err := os.WriteFile(filepath.Join(binDir, "claude"), original, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &localSession{home: home}
+	if err := InstallRemoteClaudeWrapper(s, 18339); err != nil {
+		t.Fatal(err)
+	}
+	if err := UninstallRemoteClaudeWrapper(s); err != nil {
+		t.Fatal(err)
+	}
+
+	// claude must be the original regular file again.
+	info, err := os.Lstat(filepath.Join(binDir, "claude"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("claude is a symlink after uninstall (should be regular)")
+	}
+	data, _ := os.ReadFile(filepath.Join(binDir, "claude"))
+	if string(data) != string(original) {
+		t.Fatal("origin content not restored")
+	}
+}
+
+func TestUninstall_RefusesForeignFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("bash-based install path is Linux-only")
+	}
+	home, binDir := setupFakeHome(t)
+	foreign := []byte("#!/bin/bash\n# user's own custom claude wrapper, not ours\n")
+	if err := os.WriteFile(filepath.Join(binDir, "claude"), foreign, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &localSession{home: home}
+	err := UninstallRemoteClaudeWrapper(s)
+	if err == nil {
+		t.Fatal("expected uninstall to refuse foreign file")
+	}
+	if !strings.Contains(err.Error(), "not a cc-clip wrapper") {
+		t.Fatalf("unexpected uninstall error: %v", err)
+	}
+	// Foreign file must be untouched.
+	data, _ := os.ReadFile(filepath.Join(binDir, "claude"))
+	if string(data) != string(foreign) {
+		t.Fatal("foreign file was modified")
+	}
+}
