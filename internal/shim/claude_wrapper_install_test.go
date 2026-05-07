@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -92,5 +93,43 @@ func TestClassifyClaudeBin_Symlink(t *testing.T) {
 	}
 	if kind != "symlink" {
 		t.Fatalf("got %q, want symlink", kind)
+	}
+}
+
+func TestInstall_NoPriorInstall(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("bash-based install path is Linux-only")
+	}
+	home, binDir := setupFakeHome(t)
+	s := &localSession{home: home}
+
+	if err := InstallRemoteClaudeWrapper(s, 18339); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+
+	// Wrapper should now exist as a regular file at ~/.local/bin/claude.
+	info, err := os.Lstat(filepath.Join(binDir, "claude"))
+	if err != nil {
+		t.Fatalf("claude not installed: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("claude should be a regular file, got symlink")
+	}
+	if info.Mode().Perm()&0111 == 0 {
+		t.Fatal("claude should be executable")
+	}
+
+	// No sidecar should have been created (no origin to displace).
+	if _, err := os.Lstat(filepath.Join(binDir, "claude.cc-clip-real")); !os.IsNotExist(err) {
+		t.Fatalf("sidecar should not exist on first install of 'none' case, got: %v", err)
+	}
+
+	// Content must be the wrapper script.
+	data, err := os.ReadFile(filepath.Join(binDir, "claude"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "# cc-clip claude wrapper") {
+		t.Fatal("installed file is not the cc-clip wrapper")
 	}
 }

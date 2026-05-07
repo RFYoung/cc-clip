@@ -283,28 +283,45 @@ func InstallRemoteHookScript(session *SSHSession, port int) error {
 	return nil
 }
 
-// InstallRemoteClaudeWrapper installs the claude wrapper script to
-// ~/.local/bin/claude on the remote. The wrapper auto-injects notification
-// hooks via --settings when the cc-clip tunnel is alive, and transparently
-// passes through to the real claude binary when the tunnel is down.
+// InstallRemoteClaudeWrapper installs the claude wrapper to ~/.local/bin/claude
+// on the remote, using a symlink-safe topology that never overwrites the real
+// claude binary even when ~/.local/bin/claude is a symlink to a versions store
+// (Anthropic Native Installer layout, see issue #55).
 //
-// If an existing file at ~/.local/bin/claude is found that is NOT a cc-clip
-// wrapper, it is backed up to ~/.local/bin/claude.cc-clip-bak before overwriting.
-// The backup can be restored by cc-clip uninstall or manually.
-func InstallRemoteClaudeWrapper(session *SSHSession, port int) error {
-	// Check if an existing non-cc-clip wrapper exists and back it up.
-	out, _ := session.Exec("head -5 ~/.local/bin/claude 2>/dev/null || true")
-	if out != "" && !strings.Contains(out, "cc-clip claude wrapper") {
-		session.Exec("cp ~/.local/bin/claude ~/.local/bin/claude.cc-clip-bak 2>/dev/null || true")
+// Topology:
+//   - The original entry (regular file or symlink) is renamed to
+//     ~/.local/bin/claude.cc-clip-real.
+//   - The wrapper script is written via mktemp + chmod + atomic mv.
+//   - On re-install over an existing cc-clip wrapper, the wrapper file is
+//     replaced atomically; the existing sidecar is left untouched.
+//
+// This task implements only the "none" branch; other branches return a
+// placeholder error so subsequent tasks (T7-T9) can fill them in.
+func InstallRemoteClaudeWrapper(s SessionExecutor, port int) error {
+	kind, err := classifyClaudeBin(s)
+	if err != nil {
+		return fmt.Errorf("install: classify failed: %w", err)
 	}
+	switch kind {
+	case claudeBinNone:
+		return installWrapperNoOrigin(s, port)
+	default:
+		return fmt.Errorf("install: unsupported origin kind %q (more branches added in later tasks)", kind)
+	}
+}
 
+// installWrapperNoOrigin writes the wrapper to a fresh ~/.local/bin/claude
+// when no prior file exists. No sidecar is created.
+func installWrapperNoOrigin(s SessionExecutor, port int) error {
 	script := ClaudeWrapperScript(port)
-	args := append(session.connArgs(), session.host,
-		"mkdir -p ~/.local/bin && cat > ~/.local/bin/claude && chmod +x ~/.local/bin/claude")
-	cmd := exec.Command("ssh", args...)
-	cmd.Stdin = strings.NewReader(script)
-	if outErr, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to install remote claude wrapper: %s: %w", strings.TrimSpace(string(outErr)), err)
+	cmd := `mkdir -p "$HOME/.local/bin" && \
+tmp=$(mktemp "$HOME/.local/bin/.claude.cc-clip-tmp.XXXXXX") && \
+cat > "$tmp" && \
+chmod +x "$tmp" && \
+mv "$tmp" "$HOME/.local/bin/claude"`
+	out, err := s.ExecWithStdin(cmd, strings.NewReader(script))
+	if err != nil {
+		return fmt.Errorf("install (none): %s: %w", strings.TrimSpace(out), err)
 	}
 	return nil
 }
@@ -379,6 +396,17 @@ func WriteRemoteSessionID(session *SSHSession, sessionID string) error {
 	}
 	return nil
 }
+
+// claudeBinKind values returned by classifyClaudeBin. Using named constants
+// (rather than bare strings) so the switch statements in install/uninstall
+// fail at compile time if a typo or rename is ever introduced.
+const (
+	claudeBinNone      = "none"
+	claudeBinCcWrapper = "cc_wrapper"
+	claudeBinSymlink   = "symlink"
+	claudeBinRegular   = "regular"
+	claudeBinOther     = "other"
+)
 
 // classifyClaudeBin inspects ~/.local/bin/claude on the remote and returns
 // one of: "none", "cc_wrapper", "symlink", "regular", "other".
