@@ -505,12 +505,13 @@ func cmdUninstallCodexLocal() {
 }
 
 type connectOpts struct {
-	host      string
-	port      int
-	force     bool
-	tokenOnly bool
-	codex     bool
-	noNotify  bool
+	host        string
+	port        int
+	force       bool
+	tokenOnly   bool
+	codex       bool
+	noNotify    bool
+	autoRecover bool
 }
 
 func cmdConnect() {
@@ -530,14 +531,14 @@ func cmdConnect() {
            cc-clip connect <host> --token-only`)
 		os.Exit(2)
 	}
-	_ = autoRecover // consumed in T16 (N0 wiring)
 	runConnect(connectOpts{
-		host:      os.Args[2],
-		port:      getPort(),
-		force:     hasFlag("force"),
-		tokenOnly: tokenOnly,
-		codex:     hasFlag("codex"),
-		noNotify:  hasFlag("no-notify"),
+		host:        os.Args[2],
+		port:        getPort(),
+		force:       hasFlag("force"),
+		tokenOnly:   tokenOnly,
+		codex:       hasFlag("codex"),
+		noNotify:    hasFlag("no-notify"),
+		autoRecover: autoRecover,
 	})
 }
 
@@ -570,6 +571,44 @@ func runConnect(opts connectOpts) {
 	}
 	defer session.Close()
 	fmt.Println("      SSH master connected")
+
+	// N0: Pre-deploy v0.7.0 corruption detection. Runs before any other
+	// remote write (including --token-only token sync) so a corrupted remote
+	// either aborts cleanly or recovers in one step.
+	fmt.Println("[N0] Checking for v0.7.0 wrapper corruption...")
+	corrupted, err := shim.DetectV070Corruption(session)
+	if err != nil {
+		log.Fatalf("      N0 detection failed: %v", err)
+	}
+	if corrupted {
+		if !opts.autoRecover {
+			fmt.Fprintf(os.Stderr, `
+error: detected v0.7.0 corruption on remote: ~/.local/bin/claude is a symlink
+       to a file that is now a cc-clip wrapper, with the real binary backed up
+       at ~/.local/bin/claude.cc-clip-bak.
+
+To recover, either re-run with --auto-recover:
+
+    cc-clip connect %s --auto-recover
+
+Or fix manually:
+
+    ssh %s 'mv ~/.local/bin/claude.cc-clip-bak "$(readlink -f ~/.local/bin/claude)"'
+    cc-clip connect %s
+
+If ~/.local/bin/claude.cc-clip-bak is missing on the remote, reinstall Claude
+Code via 'curl https://claude.ai/install.sh' and re-run cc-clip connect.
+`, host, host, host)
+			os.Exit(3)
+		}
+		fmt.Println("      v0.7.0 corruption detected; running recovery...")
+		if err := shim.RecoverV070Corruption(session); err != nil {
+			log.Fatalf("      recovery failed: %v", err)
+		}
+		fmt.Println("      backup migrated to versions store; continuing install")
+	} else {
+		fmt.Println("      no corruption detected")
+	}
 
 	// --token-only: skip binary/shim, just sync token and verify tunnel
 	if tokenOnly {
@@ -1007,9 +1046,10 @@ func cmdSetup() {
 	// Step 4: Deploy to remote
 	fmt.Printf("\n[4/4] Deploying to %s...\n", host)
 	runConnect(connectOpts{
-		host:  host,
-		port:  port,
-		codex: hasFlag("codex"),
+		host:        host,
+		port:        port,
+		codex:       hasFlag("codex"),
+		autoRecover: hasFlag("auto-recover"),
 	})
 }
 
