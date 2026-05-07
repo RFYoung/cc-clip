@@ -397,12 +397,28 @@ func cmdUninstall() {
 	}
 
 	if err := shim.Uninstall(target, installPath); err != nil {
-		log.Fatalf("uninstall failed: %v", err)
+		if host == "" {
+			log.Fatalf("uninstall failed: %v", err)
+		}
+		fmt.Fprintf(os.Stderr, "warning: local shim uninstall failed (continuing because --host was set): %v\n", err)
+	} else {
+		fmt.Println("Shim removed successfully.")
 	}
 
-	fmt.Println("Shim removed successfully.")
-
 	if host != "" {
+		fmt.Printf("Restoring claude wrapper on remote %s...\n", host)
+		session, err := shim.NewSSHSession(host)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to open SSH session for wrapper restore: %v\n", err)
+		} else {
+			defer session.Close()
+			if err := shim.UninstallRemoteClaudeWrapper(session); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to restore claude wrapper: %v\n", err)
+			} else {
+				fmt.Println("      claude wrapper removed; original entry restored from sidecar")
+			}
+		}
+
 		fmt.Printf("Removing PATH marker from remote %s...\n", host)
 		if err := shim.RemoveRemotePath(host); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to remove PATH marker: %v\n", err)
