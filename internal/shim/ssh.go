@@ -379,3 +379,30 @@ func WriteRemoteSessionID(session *SSHSession, sessionID string) error {
 	}
 	return nil
 }
+
+// classifyClaudeBin inspects ~/.local/bin/claude on the remote and returns
+// one of: "none", "cc_wrapper", "symlink", "regular", "other".
+//
+// "cc_wrapper" means a regular file whose first 256 bytes contain the
+// cc-clip wrapper marker — i.e. our previous install. Used to skip the
+// sidecar staging step on re-install (we just overwrite our own wrapper).
+//
+// Inspection is read-only; nothing is modified.
+func classifyClaudeBin(s SessionExecutor) (string, error) {
+	out, err := s.Exec(`p="$HOME/.local/bin/claude"
+if [ ! -e "$p" ] && [ ! -L "$p" ]; then echo none; exit 0; fi
+if [ -L "$p" ]; then echo symlink; exit 0; fi
+if [ -f "$p" ]; then
+    if head -c 256 "$p" 2>/dev/null | grep -qF "# cc-clip claude wrapper"; then
+        echo cc_wrapper
+    else
+        echo regular
+    fi
+    exit 0
+fi
+echo other`)
+	if err != nil {
+		return "", fmt.Errorf("classify ~/.local/bin/claude: %w", err)
+	}
+	return strings.TrimSpace(out), nil
+}
