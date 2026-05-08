@@ -104,7 +104,7 @@ Remote:
     --target         auto|xclip|wl-paste (default: auto)
     --path           Install directory (default: ~/.local/bin)
   uninstall          Remove shim
-    --host           Also clean up PATH marker on remote host
+    --host           Also clean up remote: claude wrapper restore + PATH marker
   paste              Fetch clipboard image and output path
     --out-dir        Output directory (env: CC_CLIP_OUT_DIR)
   send [<host>] [<file>]
@@ -126,6 +126,7 @@ Remote:
 One-command setup:
   setup <host>       Full setup: deps, SSH config, daemon, deploy
     --port           Tunnel port (default: 18339)
+    --auto-recover   Recover from v0.7.0 wrapper corruption (mutex with --token-only)
 
 Known hosts (per-user registry):
   hosts list         Show hosts this machine has connected to (version, codex, last seen)
@@ -144,6 +145,7 @@ Deploy (local -> remote):
     --local-bin      Path to pre-downloaded remote binary
     --force          Ignore remote state, full redeploy
     --token-only     Only sync token, skip binary/shim deploy
+    --auto-recover   Recover from v0.7.0 wrapper corruption (mutex with --token-only)
 
 Codex support (extends connect/setup/uninstall):
   connect <host> --codex   Deploy with Codex support (Xvfb + x11-bridge)
