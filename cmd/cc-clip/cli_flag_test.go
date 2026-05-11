@@ -41,4 +41,3 @@ func TestCLIMutex(t *testing.T) {
 		})
 	}
 }
-
