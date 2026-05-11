@@ -21,8 +21,11 @@ Complete cc-clip command reference. For the 10 most common commands, see the [Co
 | `cc-clip connect <host>` | Deploy to remote (incremental) |
 | `cc-clip connect <host> --codex` | Deploy with Codex support (Xvfb + x11-bridge) |
 | `cc-clip connect <host> --token-only` | Sync token only (fast) |
+| `cc-clip connect <host> --auto-recover` | Recover from v0.7.0 wrapper corruption + reinstall (mutex with --token-only) |
+| `cc-clip setup <host> --auto-recover` | Same recovery flow via setup path |
 | `cc-clip connect <host> --force` | Full redeploy ignoring cache |
-| `cc-clip uninstall` | Remove xclip shim from remote |
+| `cc-clip uninstall` | Remove local xclip shim only |
+| `cc-clip uninstall --host <host>` | Remove from remote: claude wrapper, PATH marker (local shim best-effort) |
 | `cc-clip uninstall --codex` | Remove Codex support (local) |
 | `cc-clip uninstall --codex --host <host>` | Remove Codex support from remote |
 

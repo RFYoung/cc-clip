@@ -420,6 +420,18 @@ cc-clip works with **any coding agent that reads the clipboard via `xclip` or `w
 cc-clip doctor --host myserver
 ```
 
+### `cc-clip: real claude binary not found in PATH` after running v0.7.0
+
+If you installed cc-clip v0.7.0 against a remote whose `claude` was installed via Anthropic's Native Installer (`curl https://claude.ai/install.sh`), v0.7.0 had a bug ([#55](https://github.com/ShunmeiCho/cc-clip/issues/55)) that overwrote the real claude binary at the symlink target. To recover:
+
+```
+cc-clip setup <host> --auto-recover
+```
+
+This detects the corrupted state, migrates the original binary back from `~/.local/bin/claude.cc-clip-bak`, and installs the (fixed) v0.7.1+ wrapper. The `--auto-recover` flag is mutually exclusive with `--token-only` — they describe different intents.
+
+If `~/.local/bin/claude.cc-clip-bak` is missing on the remote, the binary cannot be recovered automatically. Reinstall Claude Code via `curl https://claude.ai/install.sh` and re-run `cc-clip setup`.
+
 <details>
 <summary><b>"zsh: killed" after installation</b></summary>
 

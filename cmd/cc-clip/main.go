@@ -104,7 +104,7 @@ Remote:
     --target         auto|xclip|wl-paste (default: auto)
     --path           Install directory (default: ~/.local/bin)
   uninstall          Remove shim
-    --host           Also clean up PATH marker on remote host
+    --host           Also clean up remote: claude wrapper restore + PATH marker
   paste              Fetch clipboard image and output path
     --out-dir        Output directory (env: CC_CLIP_OUT_DIR)
   send [<host>] [<file>]
@@ -126,6 +126,7 @@ Remote:
 One-command setup:
   setup <host>       Full setup: deps, SSH config, daemon, deploy
     --port           Tunnel port (default: 18339)
+    --auto-recover   Recover from v0.7.0 wrapper corruption (mutex with --token-only)
 
 Known hosts (per-user registry):
   hosts list         Show hosts this machine has connected to (version, codex, last seen)
@@ -144,6 +145,7 @@ Deploy (local -> remote):
     --local-bin      Path to pre-downloaded remote binary
     --force          Ignore remote state, full redeploy
     --token-only     Only sync token, skip binary/shim deploy
+    --auto-recover   Recover from v0.7.0 wrapper corruption (mutex with --token-only)
 
 Codex support (extends connect/setup/uninstall):
   connect <host> --codex   Deploy with Codex support (Xvfb + x11-bridge)
@@ -397,12 +399,28 @@ func cmdUninstall() {
 	}
 
 	if err := shim.Uninstall(target, installPath); err != nil {
-		log.Fatalf("uninstall failed: %v", err)
+		if host == "" {
+			log.Fatalf("uninstall failed: %v", err)
+		}
+		fmt.Fprintf(os.Stderr, "warning: local shim uninstall failed (continuing because --host was set): %v\n", err)
+	} else {
+		fmt.Println("Shim removed successfully.")
 	}
 
-	fmt.Println("Shim removed successfully.")
-
 	if host != "" {
+		fmt.Printf("Restoring claude wrapper on remote %s...\n", host)
+		session, err := shim.NewSSHSession(host)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to open SSH session for wrapper restore: %v\n", err)
+		} else {
+			defer session.Close()
+			if err := shim.UninstallRemoteClaudeWrapper(session); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to restore claude wrapper: %v\n", err)
+			} else {
+				fmt.Println("      claude wrapper removed; original entry restored from sidecar")
+			}
+		}
+
 		fmt.Printf("Removing PATH marker from remote %s...\n", host)
 		if err := shim.RemoveRemotePath(host); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: failed to remove PATH marker: %v\n", err)
@@ -505,25 +523,53 @@ func cmdUninstallCodexLocal() {
 }
 
 type connectOpts struct {
-	host      string
-	port      int
-	force     bool
-	tokenOnly bool
-	codex     bool
-	noNotify  bool
+	host        string
+	port        int
+	force       bool
+	tokenOnly   bool
+	codex       bool
+	noNotify    bool
+	autoRecover bool
+}
+
+// rejectAutoRecoverWithTokenOnly enforces the spec-mandated mutual
+// exclusion between --auto-recover and --token-only at flag-parse time,
+// before any SSH activity. Shared by cmdConnect and cmdSetup so the
+// error message stays identical regardless of entrypoint.
+//
+// Returns silently when the combination is safe. Exits 2 with stderr
+// guidance when the flags conflict.
+func rejectAutoRecoverWithTokenOnly(cmdName string, autoRecover, tokenOnly bool) {
+	if !autoRecover || !tokenOnly {
+		return
+	}
+	fmt.Fprintf(os.Stderr, `error: --auto-recover cannot be combined with --token-only
+       --auto-recover performs recovery and full reinstall.
+       Re-run without --token-only:
+           cc-clip %s <host> --auto-recover
+       Or, if you only want to recover the binary without reinstalling the
+       wrapper, run the manual recovery and then cc-clip connect --token-only:
+           ssh <host> 'mv ~/.local/bin/claude.cc-clip-bak "$(readlink -f ~/.local/bin/claude)"'
+           cc-clip connect <host> --token-only
+`, cmdName)
+	os.Exit(2)
 }
 
 func cmdConnect() {
 	if len(os.Args) < 3 {
 		log.Fatal("usage: cc-clip connect <host> [--port PORT] [--force] [--token-only] [--no-notify]")
 	}
+	autoRecover := hasFlag("auto-recover")
+	tokenOnly := hasFlag("token-only")
+	rejectAutoRecoverWithTokenOnly("connect", autoRecover, tokenOnly)
 	runConnect(connectOpts{
-		host:      os.Args[2],
-		port:      getPort(),
-		force:     hasFlag("force"),
-		tokenOnly: hasFlag("token-only"),
-		codex:     hasFlag("codex"),
-		noNotify:  hasFlag("no-notify"),
+		host:        os.Args[2],
+		port:        getPort(),
+		force:       hasFlag("force"),
+		tokenOnly:   tokenOnly,
+		codex:       hasFlag("codex"),
+		noNotify:    hasFlag("no-notify"),
+		autoRecover: autoRecover,
 	})
 }
 
@@ -556,6 +602,74 @@ func runConnect(opts connectOpts) {
 	}
 	defer session.Close()
 	fmt.Println("      SSH master connected")
+
+	// N0: Pre-deploy v0.7.0 corruption detection. Runs before any other
+	// remote write (including --token-only token sync) so a corrupted remote
+	// either aborts cleanly or recovers in one step.
+	//
+	// Tri-state gate: NotCorrupted continues, Recoverable either aborts
+	// with a hint or auto-recovers depending on --auto-recover, and
+	// NonRecoverable always aborts (the real claude binary is lost; only
+	// the operator can fix it by reinstalling via curl https://claude.ai/install.sh).
+	fmt.Println("[N0] Checking for v0.7.0 wrapper corruption...")
+	state, diag, err := shim.DetectV070State(session)
+	if err != nil {
+		log.Fatalf("      N0 detection failed: %v", err)
+	}
+	switch state {
+	case shim.V070NotCorrupted:
+		fmt.Printf("      no corruption detected (%s)\n", diag)
+	case shim.V070Recoverable:
+		if !opts.autoRecover {
+			fmt.Fprintf(os.Stderr, `
+error: detected v0.7.0 corruption on remote: ~/.local/bin/claude is a symlink
+       to a file that is now a cc-clip wrapper, with the real binary backed up
+       at ~/.local/bin/claude.cc-clip-bak.
+
+To recover, either re-run with --auto-recover:
+
+    cc-clip connect %s --auto-recover
+
+Or fix manually:
+
+    ssh %s 'mv ~/.local/bin/claude.cc-clip-bak "$(readlink -f ~/.local/bin/claude)"'
+    cc-clip connect %s
+`, host, host, host)
+			os.Exit(3)
+		}
+		fmt.Println("      v0.7.0 corruption detected; running recovery...")
+		if err := shim.RecoverV070Corruption(session); err != nil {
+			log.Fatalf("      recovery failed: %v", err)
+		}
+		fmt.Println("      backup migrated to versions store; continuing install")
+	case shim.V070NonRecoverable:
+		// Fail-closed: do NOT continue, even with --auto-recover. The
+		// recovery path requires a non-wrapper backup, which by definition
+		// does not exist in this state. Proceeding would layer a fresh
+		// wrapper on top of a half-broken Native Installer layout.
+		fmt.Fprintf(os.Stderr, `
+error: detected non-recoverable v0.7.0 corruption on remote (%s).
+       ~/.local/bin/claude is a symlink whose target is a cc-clip wrapper,
+       but the real-binary backup at ~/.local/bin/claude.cc-clip-bak is
+       missing, too small, or itself a wrapper — auto-recovery cannot
+       restore the original Claude Code binary.
+
+Manual recovery required:
+
+    1. Reinstall Claude Code on %s:
+
+       ssh %s 'curl -fsSL https://claude.ai/install.sh | bash'
+
+    2. After Claude Code is reinstalled, retry cc-clip:
+
+       cc-clip connect %s
+
+The --auto-recover flag does NOT help here because there is no usable
+backup to migrate. cc-clip will refuse to write any wrapper until the
+remote has a valid claude binary installed.
+`, diag, host, host, host)
+		os.Exit(3)
+	}
 
 	// --token-only: skip binary/shim, just sync token and verify tunnel
 	if tokenOnly {
@@ -937,6 +1051,13 @@ func cmdSetup() {
 	host := os.Args[2]
 	port := getPort()
 
+	// Reject conflicting flag combinations at parse time, before any
+	// dependency check or remote activity. Spec scenario 22 requires
+	// setup to fail-fast just like connect does.
+	autoRecover := hasFlag("auto-recover")
+	tokenOnly := hasFlag("token-only")
+	rejectAutoRecoverWithTokenOnly("setup", autoRecover, tokenOnly)
+
 	// Step 1: Dependencies
 	fmt.Println("[1/4] Checking local dependencies...")
 	if runtime.GOOS == "darwin" {
@@ -993,9 +1114,10 @@ func cmdSetup() {
 	// Step 4: Deploy to remote
 	fmt.Printf("\n[4/4] Deploying to %s...\n", host)
 	runConnect(connectOpts{
-		host:  host,
-		port:  port,
-		codex: hasFlag("codex"),
+		host:        host,
+		port:        port,
+		codex:       hasFlag("codex"),
+		autoRecover: autoRecover,
 	})
 }
 
