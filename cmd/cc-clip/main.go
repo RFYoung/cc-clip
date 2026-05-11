@@ -532,23 +532,36 @@ type connectOpts struct {
 	autoRecover bool
 }
 
+// rejectAutoRecoverWithTokenOnly enforces the spec-mandated mutual
+// exclusion between --auto-recover and --token-only at flag-parse time,
+// before any SSH activity. Shared by cmdConnect and cmdSetup so the
+// error message stays identical regardless of entrypoint.
+//
+// Returns silently when the combination is safe. Exits 2 with stderr
+// guidance when the flags conflict.
+func rejectAutoRecoverWithTokenOnly(cmdName string, autoRecover, tokenOnly bool) {
+	if !autoRecover || !tokenOnly {
+		return
+	}
+	fmt.Fprintf(os.Stderr, `error: --auto-recover cannot be combined with --token-only
+       --auto-recover performs recovery and full reinstall.
+       Re-run without --token-only:
+           cc-clip %s <host> --auto-recover
+       Or, if you only want to recover the binary without reinstalling the
+       wrapper, run the manual recovery and then cc-clip connect --token-only:
+           ssh <host> 'mv ~/.local/bin/claude.cc-clip-bak "$(readlink -f ~/.local/bin/claude)"'
+           cc-clip connect <host> --token-only
+`, cmdName)
+	os.Exit(2)
+}
+
 func cmdConnect() {
 	if len(os.Args) < 3 {
 		log.Fatal("usage: cc-clip connect <host> [--port PORT] [--force] [--token-only] [--no-notify]")
 	}
 	autoRecover := hasFlag("auto-recover")
 	tokenOnly := hasFlag("token-only")
-	if autoRecover && tokenOnly {
-		fmt.Fprintln(os.Stderr, `error: --auto-recover cannot be combined with --token-only
-       --auto-recover performs recovery and full reinstall.
-       Re-run without --token-only:
-           cc-clip connect <host> --auto-recover
-       Or, if you only want to recover the binary without reinstalling the
-       wrapper, run the manual recovery and then cc-clip connect --token-only:
-           ssh <host> 'mv ~/.local/bin/claude.cc-clip-bak "$(readlink -f ~/.local/bin/claude)"'
-           cc-clip connect <host> --token-only`)
-		os.Exit(2)
-	}
+	rejectAutoRecoverWithTokenOnly("connect", autoRecover, tokenOnly)
 	runConnect(connectOpts{
 		host:        os.Args[2],
 		port:        getPort(),
@@ -593,12 +606,20 @@ func runConnect(opts connectOpts) {
 	// N0: Pre-deploy v0.7.0 corruption detection. Runs before any other
 	// remote write (including --token-only token sync) so a corrupted remote
 	// either aborts cleanly or recovers in one step.
+	//
+	// Tri-state gate: NotCorrupted continues, Recoverable either aborts
+	// with a hint or auto-recovers depending on --auto-recover, and
+	// NonRecoverable always aborts (the real claude binary is lost; only
+	// the operator can fix it by reinstalling via curl https://claude.ai/install.sh).
 	fmt.Println("[N0] Checking for v0.7.0 wrapper corruption...")
-	corrupted, err := shim.DetectV070Corruption(session)
+	state, diag, err := shim.DetectV070State(session)
 	if err != nil {
 		log.Fatalf("      N0 detection failed: %v", err)
 	}
-	if corrupted {
+	switch state {
+	case shim.V070NotCorrupted:
+		fmt.Printf("      no corruption detected (%s)\n", diag)
+	case shim.V070Recoverable:
 		if !opts.autoRecover {
 			fmt.Fprintf(os.Stderr, `
 error: detected v0.7.0 corruption on remote: ~/.local/bin/claude is a symlink
@@ -613,9 +634,6 @@ Or fix manually:
 
     ssh %s 'mv ~/.local/bin/claude.cc-clip-bak "$(readlink -f ~/.local/bin/claude)"'
     cc-clip connect %s
-
-If ~/.local/bin/claude.cc-clip-bak is missing on the remote, reinstall Claude
-Code via 'curl https://claude.ai/install.sh' and re-run cc-clip connect.
 `, host, host, host)
 			os.Exit(3)
 		}
@@ -624,8 +642,33 @@ Code via 'curl https://claude.ai/install.sh' and re-run cc-clip connect.
 			log.Fatalf("      recovery failed: %v", err)
 		}
 		fmt.Println("      backup migrated to versions store; continuing install")
-	} else {
-		fmt.Println("      no corruption detected")
+	case shim.V070NonRecoverable:
+		// Fail-closed: do NOT continue, even with --auto-recover. The
+		// recovery path requires a non-wrapper backup, which by definition
+		// does not exist in this state. Proceeding would layer a fresh
+		// wrapper on top of a half-broken Native Installer layout.
+		fmt.Fprintf(os.Stderr, `
+error: detected non-recoverable v0.7.0 corruption on remote (%s).
+       ~/.local/bin/claude is a symlink whose target is a cc-clip wrapper,
+       but the real-binary backup at ~/.local/bin/claude.cc-clip-bak is
+       missing, too small, or itself a wrapper — auto-recovery cannot
+       restore the original Claude Code binary.
+
+Manual recovery required:
+
+    1. Reinstall Claude Code on %s:
+
+       ssh %s 'curl -fsSL https://claude.ai/install.sh | bash'
+
+    2. After Claude Code is reinstalled, retry cc-clip:
+
+       cc-clip connect %s
+
+The --auto-recover flag does NOT help here because there is no usable
+backup to migrate. cc-clip will refuse to write any wrapper until the
+remote has a valid claude binary installed.
+`, diag, host, host, host)
+		os.Exit(3)
 	}
 
 	// --token-only: skip binary/shim, just sync token and verify tunnel
@@ -1008,6 +1051,13 @@ func cmdSetup() {
 	host := os.Args[2]
 	port := getPort()
 
+	// Reject conflicting flag combinations at parse time, before any
+	// dependency check or remote activity. Spec scenario 22 requires
+	// setup to fail-fast just like connect does.
+	autoRecover := hasFlag("auto-recover")
+	tokenOnly := hasFlag("token-only")
+	rejectAutoRecoverWithTokenOnly("setup", autoRecover, tokenOnly)
+
 	// Step 1: Dependencies
 	fmt.Println("[1/4] Checking local dependencies...")
 	if runtime.GOOS == "darwin" {
@@ -1067,7 +1117,7 @@ func cmdSetup() {
 		host:        host,
 		port:        port,
 		codex:       hasFlag("codex"),
-		autoRecover: hasFlag("auto-recover"),
+		autoRecover: autoRecover,
 	})
 }
 
