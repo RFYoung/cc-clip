@@ -30,6 +30,13 @@ const (
 	claudeHookCType = "application/x-claude-hook"
 )
 
+const (
+	httpReadHeaderTimeout = 2 * time.Second
+	httpReadTimeout       = 10 * time.Second
+	httpWriteTimeout      = 30 * time.Second
+	httpIdleTimeout       = 60 * time.Second
+)
+
 const notifyChCap = 8
 
 type Server struct {
@@ -67,9 +74,9 @@ func NewServer(addr string, clipboard ClipboardReader, tokens *token.Manager, se
 
 // nonceEntry tracks metadata for a registered notification nonce.
 type nonceEntry struct {
-	Host       string
-	IssuedAt   time.Time
-	ExpiresAt  time.Time
+	Host      string
+	IssuedAt  time.Time
+	ExpiresAt time.Time
 }
 
 // nonceTTL is the default lifetime for notification nonces.
@@ -240,7 +247,11 @@ func (s *Server) Handler() http.Handler {
 
 // Serve accepts connections on the given listener and serves HTTP.
 func (s *Server) Serve(ln net.Listener) error {
-	return http.Serve(ln, s.mux)
+	if err := requireLoopbackListener(ln.Addr()); err != nil {
+		_ = ln.Close()
+		return err
+	}
+	return s.httpServer().Serve(ln)
 }
 
 func (s *Server) ListenAndServe() error {
@@ -249,30 +260,66 @@ func (s *Server) ListenAndServe() error {
 		return fmt.Errorf("failed to listen on %s: %w", s.addr, err)
 	}
 
-	host, _, _ := net.SplitHostPort(s.addr)
-	if host != "127.0.0.1" && host != "localhost" && host != "::1" {
-		listener.Close()
-		return fmt.Errorf("refusing to listen on non-loopback address: %s", host)
+	if err := requireLoopbackListener(listener.Addr()); err != nil {
+		_ = listener.Close()
+		return err
 	}
 
 	log.Printf("cc-clip daemon listening on %s", s.addr)
-	return http.Serve(listener, s.mux)
+	return s.httpServer().Serve(listener)
+}
+
+func (s *Server) httpServer() *http.Server {
+	return &http.Server{
+		Handler:           s.mux,
+		ReadHeaderTimeout: httpReadHeaderTimeout,
+		ReadTimeout:       httpReadTimeout,
+		WriteTimeout:      httpWriteTimeout,
+		IdleTimeout:       httpIdleTimeout,
+		MaxHeaderBytes:    1 << 20,
+	}
+}
+
+func requireLoopbackListener(addr net.Addr) error {
+	if tcpAddr, ok := addr.(*net.TCPAddr); ok {
+		if tcpAddr.IP != nil && tcpAddr.IP.IsLoopback() {
+			return nil
+		}
+		host := "unspecified"
+		if tcpAddr.IP != nil {
+			host = tcpAddr.IP.String()
+		}
+		return fmt.Errorf("refusing to listen on non-loopback address: %s", host)
+	}
+
+	host, _, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return fmt.Errorf("refusing to listen on non-loopback address: %s", addr.String())
+	}
+	if host == "localhost" {
+		return nil
+	}
+	ip := net.ParseIP(host)
+	if ip != nil && ip.IsLoopback() {
+		return nil
+	}
+	return fmt.Errorf("refusing to listen on non-loopback address: %s", host)
 }
 
 func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Check User-Agent
-		ua := r.Header.Get("User-Agent")
-		if ua != "" && !strings.HasPrefix(ua, userAgent) {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
-
 		auth := r.Header.Get("Authorization")
 		if !strings.HasPrefix(auth, "Bearer ") {
 			http.Error(w, "missing authorization", http.StatusUnauthorized)
 			return
 		}
+
+		ua := r.Header.Get("User-Agent")
+		if !strings.HasPrefix(ua, userAgent) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+
 		tok := strings.TrimPrefix(auth, "Bearer ")
 
 		if err := s.tokens.Validate(tok); err != nil {

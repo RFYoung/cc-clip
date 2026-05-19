@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -34,6 +36,53 @@ func newTestServer(clip ClipboardReader) (*Server, string) {
 	store := session.NewStore(12 * time.Hour)
 	srv := NewServer("127.0.0.1:0", clip, tm, store)
 	return srv, s.Token
+}
+
+type staticAddrListener struct {
+	addr net.Addr
+}
+
+func (l staticAddrListener) Accept() (net.Conn, error) {
+	return nil, errors.New("accept should not be reached")
+}
+
+func (l staticAddrListener) Close() error {
+	return nil
+}
+
+func (l staticAddrListener) Addr() net.Addr {
+	return l.addr
+}
+
+func TestServeRejectsNonLoopbackListener(t *testing.T) {
+	srv, _ := newTestServer(&mockClipboard{})
+	err := srv.Serve(staticAddrListener{
+		addr: &net.TCPAddr{IP: net.ParseIP("0.0.0.0"), Port: 18339},
+	})
+	if err == nil || !strings.Contains(err.Error(), "non-loopback") {
+		t.Fatalf("expected non-loopback listener rejection, got %v", err)
+	}
+}
+
+func TestHTTPServerHasDefensiveTimeouts(t *testing.T) {
+	srv, _ := newTestServer(&mockClipboard{})
+	httpSrv := srv.httpServer()
+
+	if httpSrv.Handler != srv.mux {
+		t.Fatal("http server should use server mux")
+	}
+	if httpSrv.ReadHeaderTimeout <= 0 {
+		t.Fatal("ReadHeaderTimeout must be configured")
+	}
+	if httpSrv.ReadTimeout <= 0 {
+		t.Fatal("ReadTimeout must be configured")
+	}
+	if httpSrv.WriteTimeout <= 0 {
+		t.Fatal("WriteTimeout must be configured")
+	}
+	if httpSrv.IdleTimeout <= 0 {
+		t.Fatal("IdleTimeout must be configured")
+	}
 }
 
 func TestHealthEndpoint(t *testing.T) {
@@ -89,6 +138,20 @@ func TestClipboardTypeWithAuth(t *testing.T) {
 	}
 	if info.Format != "png" {
 		t.Fatalf("expected png format, got %s", info.Format)
+	}
+}
+
+func TestClipboardTypeRejectsMissingUserAgentWithAuth(t *testing.T) {
+	clip := &mockClipboard{clipType: ClipboardInfo{Type: ClipboardImage, Format: "png"}}
+	srv, tok := newTestServer(clip)
+
+	req := httptest.NewRequest("GET", "/clipboard/type", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	w := httptest.NewRecorder()
+	srv.mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 without User-Agent, got %d", w.Code)
 	}
 }
 
@@ -325,6 +388,7 @@ func TestRegisterNonceEndpointRegistersNonce(t *testing.T) {
 	req := httptest.NewRequest("POST", "/register-nonce", body)
 	req.Header.Set("Authorization", "Bearer "+s.Token)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "cc-clip/0.1")
 	w := httptest.NewRecorder()
 
 	srv.mux.ServeHTTP(w, req)
@@ -378,6 +442,7 @@ func TestRegisterNonceEndpointRejectsEmptyNonce(t *testing.T) {
 	req := httptest.NewRequest("POST", "/register-nonce", body)
 	req.Header.Set("Authorization", "Bearer "+s.Token)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "cc-clip/0.1")
 	w := httptest.NewRecorder()
 
 	srv.mux.ServeHTTP(w, req)
@@ -398,6 +463,7 @@ func TestRegisterNonceEndpointRejectsInvalidJSON(t *testing.T) {
 	req := httptest.NewRequest("POST", "/register-nonce", body)
 	req.Header.Set("Authorization", "Bearer "+s.Token)
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "cc-clip/0.1")
 	w := httptest.NewRecorder()
 
 	srv.mux.ServeHTTP(w, req)

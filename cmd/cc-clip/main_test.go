@@ -85,6 +85,60 @@ func helperSleepProcess(t *testing.T) *exec.Cmd {
 	return cmd
 }
 
+func TestGetPortFlagOverridesEnv(t *testing.T) {
+	oldArgs := os.Args
+	oldEnv, hadEnv := os.LookupEnv("CC_CLIP_PORT")
+	t.Cleanup(func() {
+		os.Args = oldArgs
+		if hadEnv {
+			_ = os.Setenv("CC_CLIP_PORT", oldEnv)
+		} else {
+			_ = os.Unsetenv("CC_CLIP_PORT")
+		}
+	})
+
+	os.Args = []string{"cc-clip", "serve", "--port", "19000"}
+	if err := os.Setenv("CC_CLIP_PORT", "18000"); err != nil {
+		t.Fatalf("set env: %v", err)
+	}
+
+	if got := getPort(); got != 19000 {
+		t.Fatalf("getPort() = %d, want CLI flag to override env with 19000", got)
+	}
+}
+
+func TestManualFlagParsingSupportsEqualsForm(t *testing.T) {
+	oldArgs := os.Args
+	t.Cleanup(func() {
+		os.Args = oldArgs
+	})
+
+	os.Args = []string{"cc-clip", "connect", "venus", "--port=19001", "--local-bin=/tmp/cc-clip", "--force=true"}
+
+	if got := getPort(); got != 19001 {
+		t.Fatalf("getPort() = %d, want 19001", got)
+	}
+	if got := getFlag("local-bin", "fallback"); got != "/tmp/cc-clip" {
+		t.Fatalf("getFlag(local-bin) = %q", got)
+	}
+	if !hasFlag("force") {
+		t.Fatal("hasFlag(force) should accept --force=true")
+	}
+}
+
+func TestManualFlagParsingRejectsExplicitFalseBool(t *testing.T) {
+	oldArgs := os.Args
+	t.Cleanup(func() {
+		os.Args = oldArgs
+	})
+
+	os.Args = []string{"cc-clip", "connect", "venus", "--force=false"}
+
+	if hasFlag("force") {
+		t.Fatal("hasFlag(force) should not treat --force=false as enabled")
+	}
+}
+
 func TestReleaseVersion(t *testing.T) {
 	tests := []struct {
 		input string

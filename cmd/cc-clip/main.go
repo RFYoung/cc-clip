@@ -176,15 +176,13 @@ Internal (used by deploy):
 
 func getPort() int {
 	port := 18339
-	for i, arg := range os.Args {
-		if arg == "--port" && i+1 < len(os.Args) {
-			if p, err := strconv.Atoi(os.Args[i+1]); err == nil {
-				port = p
-			}
-		}
-	}
 	if env := os.Getenv("CC_CLIP_PORT"); env != "" {
 		if p, err := strconv.Atoi(env); err == nil {
+			port = p
+		}
+	}
+	if flag := getFlag("port", ""); flag != "" {
+		if p, err := strconv.Atoi(flag); err == nil {
 			port = p
 		}
 	}
@@ -192,18 +190,38 @@ func getPort() int {
 }
 
 func getFlag(name, fallback string) string {
-	for i, arg := range os.Args {
-		if arg == "--"+name && i+1 < len(os.Args) {
-			return os.Args[i+1]
-		}
+	if value, ok := flagValue(name); ok {
+		return value
 	}
 	return fallback
 }
 
+func flagValue(name string) (string, bool) {
+	prefix := "--" + name + "="
+	for i, arg := range os.Args {
+		if strings.HasPrefix(arg, prefix) {
+			return strings.TrimPrefix(arg, prefix), true
+		}
+		if arg == "--"+name && i+1 < len(os.Args) {
+			return os.Args[i+1], true
+		}
+	}
+	return "", false
+}
+
 func hasFlag(name string) bool {
+	prefix := "--" + name + "="
 	for _, arg := range os.Args {
 		if arg == "--"+name {
 			return true
+		}
+		if strings.HasPrefix(arg, prefix) {
+			value := strings.TrimPrefix(arg, prefix)
+			enabled, err := strconv.ParseBool(value)
+			if err != nil {
+				return true
+			}
+			return enabled
 		}
 	}
 	return false
