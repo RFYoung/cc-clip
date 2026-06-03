@@ -9,7 +9,7 @@
 </p>
 <h1 align="center">cc-clip</h1>
 <p align="center">
-  <b>Paste images over SSH for Claude Code, Codex CLI, and opencode — plus desktop notifications for Claude Code and Codex CLI.</b>
+  <b>Paste images over SSH for Claude Code, Codex CLI, and opencode — plus desktop notifications for Claude Code, Codex CLI, and opencode.</b>
 </p>
 <p align="center">
   <a href="https://github.com/ShunmeiCho/cc-clip/releases"><img src="https://img.shields.io/github/v/release/ShunmeiCho/cc-clip?color=D97706" alt="Release"></a>
@@ -65,12 +65,13 @@ Image paste:
   Codex CLI:             Mac clipboard     → cc-clip daemon → SSH tunnel → x11-bridge/Xvfb   → Codex CLI
   opencode:              Mac clipboard     → cc-clip daemon → SSH tunnel → xclip/wl-paste shim → opencode
 
-Notifications (Claude Code + Codex CLI):
+Notifications (Claude Code + Codex CLI + opencode):
   Claude Code hook → cc-clip-hook → SSH tunnel → local daemon → macOS/cmux notification
   Codex notify     → cc-clip notify             → SSH tunnel → local daemon → macOS/cmux notification
+  opencode idle    → cc-clip plugin run opencode-notify → SSH tunnel → local daemon → macOS/cmux notification
 ```
 
-One tool. No changes to Claude Code, Codex, or opencode. Clipboard works for all three; notifications are wired for Claude Code and Codex CLI.
+One tool. No changes to Claude Code, Codex, or opencode. Clipboard works for all three; notifications are wired for Claude Code, Codex CLI, and opencode.
 
 This is still an SSH clipboard bridge, not magic. Setup intentionally touches SSH config, installs remote clipboard shims, and relies on `RemoteForward`; the [Troubleshooting](#troubleshooting) section documents the SSH and shell gotchas cc-clip knows about.
 
@@ -159,7 +160,7 @@ Pick the row that matches your remote workflow. These are the only decisions you
 | Claude Code only | `cc-clip setup myserver` | xclip / wl-paste shim | ❌ No |
 | Claude Code + Codex CLI | `cc-clip setup myserver --all` | shim **plus** Xvfb + x11-bridge on the remote (see below) | ✅ **Yes** — passwordless `sudo` for `apt`/`dnf install xvfb`, or run it manually first |
 | Codex CLI only | `cc-clip setup myserver --codex` | Xvfb + x11-bridge only — **no** Claude shim | ✅ **Yes** — same Xvfb `sudo` as above |
-| opencode only | `cc-clip setup myserver` | shim only — opencode reads the clipboard via the same xclip / wl-paste path as Claude Code, so it works without `--codex` | ❌ No |
+| opencode only | `cc-clip setup myserver --opencode` | clipboard shim + opencode-notify (forwards session.idle); opencode reads the clipboard via the same xclip / wl-paste path as Claude Code | ❌ No |
 | Antigravity (agy) only | `cc-clip setup myserver --agy` | agy notify plugin (`cc-clip-notify`) — notify-only today, clipboard paste still pending; requires `agy` installed on the remote | ❌ No |
 | Windows local machine | See [Windows Quick Start](docs/windows-quickstart.md) | different workflow — do not use `--codex` | ❌ No |
 
@@ -317,9 +318,9 @@ Remote hook events (Claude finishing, tool approval requests, image paste events
 
 | CLI | Auto-configured by `cc-clip connect`? |
 |-----|----------------------------------------|
-| Codex CLI | ✅ If `~/.codex/` exists on the remote |
+| Codex CLI | ✅ If a Codex target (`--codex`/`--all`) is selected and `~/.codex/` exists |
 | Claude Code | ✅ Managed hooks in `~/.claude/settings.json` |
-| opencode | ❌ Not yet supported out of the box |
+| opencode | ✅ If `opencode` is installed and an opencode target (`--opencode`/`--all`) is selected |
 
 Full setup, manual configuration for Claude Code, nonce registration, and troubleshooting: **[docs/notifications.md](docs/notifications.md)**.
 
@@ -407,7 +408,7 @@ cc-clip works with **any coding agent that reads the clipboard via `xclip` or `w
 |-----|-------------|----------------|
 | [Claude Code](https://www.anthropic.com/claude-code) | ✅ out of the box (xclip / wl-paste shim) | ✅ via `cc-clip-hook` in `Stop` / `Notification` hooks |
 | [Codex CLI](https://github.com/openai/codex) | ✅ out of the box (Xvfb + x11-bridge; needs `--codex`) | ✅ auto-configured when a Codex target is selected (`--codex` or `--all`) during `cc-clip connect` and `~/.codex/` exists |
-| [opencode](https://opencode.ai) | ✅ out of the box (xclip shim on X11, wl-paste shim on Wayland) | ⚠️ not auto-configured — wire your own notifier if desired |
+| [opencode](https://opencode.ai) | ✅ out of the box (xclip shim on X11, wl-paste shim on Wayland) | ✅ auto-configured when an opencode target is selected (`--opencode` or `--all`) during `cc-clip connect` and `opencode` is installed |
 | [Antigravity (agy)](https://antigravity.google) | ⏳ pending — clipboard transport not yet implemented (notify-only today) | ✅ auto-configured when an Antigravity target is selected (`--agy` or `--all`) during `cc-clip connect` and `agy` is installed |
 | Any other `xclip`/`wl-paste` consumer | ✅ should just work — please [open a discussion](https://github.com/ShunmeiCho/cc-clip/discussions) if it doesn't | — |
 

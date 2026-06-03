@@ -36,7 +36,7 @@
    media-file (SPECULATIVE) → Antigravity 候选之一，未定（见 §9）
 
 轴 B integration adapter（通知，cc-clip 管生命周期；CLI 配置只是启动器）
-   claude-notify / codex-notify / opencode-notify(步骤4) / antigravity-notify
+   claude-notify / codex-notify / opencode-notify / antigravity-notify
 
 轴 C install source（每 adapter 的安装来源，InstallSourceChain 按失败分类决策）
    marketplace(git源钉版, consent-gated) → bundled(cc-clip 上传) → config(legacy 直写)
@@ -60,9 +60,9 @@
 |---|---|---|---|
 | `--claude` | shim | claude-notify | |
 | `--codex` | x11 | codex-notify | breaking：不再含 shim |
-| `--opencode` | shim | **无** | 仅 shim；不碰 `~/.claude/settings.json`、`~/.codex/config.toml`；opencode-notify 步骤 4 引入 |
+| `--opencode` | shim | **opencode-notify** | shim + opencode 通知插件（session.idle）；不碰 `~/.claude/settings.json`、`~/.codex/config.toml`；步骤 7 已落地 |
 | `--antigravity` | **pending(probe)** | antigravity-notify | notify 可先做（bundled plugin）；clipboard 待远端 strace |
-| `--all` | shim + x11 (+antigravity-notify) | claude-notify + codex-notify + antigravity-notify | **不含** antigravity clipboard（未定性前） |
+| `--all` | shim + x11 (+antigravity-notify) | claude-notify + codex-notify + opencode-notify + antigravity-notify | **不含** antigravity clipboard（未定性前） |
 | 无参 (TTY) | 菜单 | | connect 默认未触发；菜单见 §5 |
 | 无参 (非 TTY) | connect=shim / setup=shim | | connect→claude+告警；setup→claude+告警（v0.9.0：与 connect 一致回退 {Claude}，绝不静默 all/sudo） |
 | 修饰：`--token-only`/`--no-hooks`/`--hooks`/`--no-notify`/`--yes`/`--no-plugin-marketplace`/`--force` | | | 见 §6 矩阵 |
@@ -90,7 +90,7 @@ func parseDeployTargets(args []string) (t DeployTargets, explicit bool, err erro
 Select deployment target:
   1) claude       clipboard shim + claude-notify
   2) codex        X11 bridge + codex-notify
-  3) opencode     clipboard shim only (no Claude/Codex config changes)
+  3) opencode     clipboard shim + opencode-notify
   4) antigravity  antigravity-notify plugin (clipboard transport pending)
   5) all          everything above (antigravity clipboard excluded until resolved)
 >
@@ -128,7 +128,7 @@ Legend: ALLOWED / ERROR(exit 2) / NO-OP(warn)
 | claude-notify | `~/.claude/settings.json` hooks → `cc-clip-hook`（或直接 runner） | hook JSON in；**exit 0，fire-and-forget**，无 stdout 要求（CLAUDE.md 现有原则） |
 | codex-notify | `~/.codex/config.toml` `notify=["cc-clip","notify",...]` | codex stdin；exit 0 |
 | antigravity-notify | `agy` Stop hook（plugin `hooks.json`） | hook JSON in；**必须 stdout 吐合法放行 JSON 如 `{"decision":""}`**，否则可能阻止 agy 停止——与 fire-and-forget 相反 |
-| opencode-notify（步骤4） | `~/.opencode/plugins/cc-clip-notify.js` 真 plugin 事件回调 | JS 反向调 cc-clip |
+| opencode-notify（步骤7,已落地） | `~/.config/opencode/plugins/cc-clip-notify.js` 真 plugin 事件回调（session.idle） | JS 子进程 stdin 喂 JSON 反向调 cc-clip |
 
 ```go
 type PluginAdapter interface {
@@ -228,7 +228,7 @@ type NotifyDeployState struct {
 
 - **读时迁移** `migrateNotifyState`（在 `ReadRemoteState` unmarshal 后调用）：`HookInstalled→claude-notify`、`CodexInjected→codex-notify`（Source=config）；清空旧指针使下次 Write 只持久化新 schema；`Adapters!=nil` 守卫幂等。
 - per-adapter 谓词：`NeedsAdapterInstall/NeedsAdapterVerify/AdapterInstalled`；`NeedsNotifySetup` 保留为 master-switch shim 减少 call-site 改动。
-- **opencode-notify source 未定**：v0.9.0 不装（`--opencode`=仅 shim），Source 值留步骤 4 决定。
+- **opencode-notify source = config**：步骤 7 已落地，`--opencode`/`--all` 安装 opencode notify 插件；`applyAdapterState` 记 Source=config、Verified=false。
 - **状态是 cache、`Verify()` 是权威（关键原则，来自复核）**：`WriteRemoteState` 失败仅 warning（`main.go:938`）、doctor 仅报告缺失（`doctor/remote.go:198`），故远端 `deploy.json` 可能缺失/陈旧。per-adapter 真实状态**必须由 `Verify()` 检查远端实际 plugin/config 文件**得出；state 缺失时**不得**盲目反复 marketplace 安装——先 `Verify()` 再决定是否装。
 
 ## 12. setup 入口收口
@@ -278,7 +278,7 @@ grep -E 'xclip|wl-paste|xsel|wl-copy|osc52|tmux|uploaded_media' /tmp/agy.execve
 4. ✅ `internal/install` InstallSourceChain + 规范 AdapterSource + 失败分类 + consent gate + 新 exitcode。`dd30531`(step 4/7)。
 5. ✅ 引入 `--claude/--codex/--opencode/--antigravity/--all` + 菜单 + `parseDeployTargets`(判别器) + 矩阵；connect/setup 同步 breaking。`25d5947`(5.1 parser)、`5b86477`(5.2 菜单/非TTY)、`0286f83`(5.3a 容错 host 解析)、`5a1e269`+`d453a38`(5.3b 目标解析接线 + exit-2 矩阵 + legacy `--codex` 提示)、`489eea2`+`7d2ce09`+`5d0883f`(5.3c per-target 门控 + 非对称适配器测试 + 措辞修复)。**Option A 已拍板**：纯 `--codex`/`--agy` 跳过 shim 安装、绝不卸载既有 shim。
 6. ✅ **Antigravity**：agy-notify bundled adapter + connect N5/N5.5 接线（temp-src bundle → `agy plugin validate` → `agy plugin install`，`command -v agy` 探测，`Verified=false`）。install smoke 双门控（`CC_CLIP_AGY_SMOKE=1` + agy 在 PATH，隔离 HOME）；真实远端 Stop hook-fire smoke + uninstall 路径列入 backlog；clipboard 待 strace。`78819f8`+`196e8cb`+`c5fc37d`。
-7. ⏳ opencode-notify 真 plugin（步骤 4），剪贴板仍 shim。**（agy 之后）**
+7. ✅ **opencode-notify** 真 plugin：`opencode-notify` runner + parser（`runOpencodeNotify`/`parseOpencodeNotifyPayload`，`session.idle` → `GenericMessagePayload`）+ `RemoteHasOpencode` 探测 + `EnsureRemoteOpencodePlugin`（drop `~/.config/opencode/plugins/cc-clip-notify.js`，原子 mktemp+mv，`port` 烘焙进 `cc-clip plugin run opencode-notify` 命令）+ `StripRemoteOpencodePlugin`（对称 helper，Step 7 不接线任何 uninstall 分支）+ connect N5.7 `buildNotifyAdapters()` 表行（`opencodeNotifyTargeted` 门控 `--opencode`/`--all`，`command -v opencode` 探测，`Verified=false`）。JS 语法 smoke 默认跑（`node --check`，gated on node/bun）；真实 `session.idle` hook-fire smoke 双门控（`CC_CLIP_OPENCODE_SMOKE=1` + opencode 在 PATH）列入 backlog。剪贴板仍走 shim。`5fecd5c`(runner/parser)、`a497188`(探测/安装/JS 模板)、`41194a9`(connect 接线)。**（agy 之后）**
 
 ## 16. 需协调修改的文件
 
