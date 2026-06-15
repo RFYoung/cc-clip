@@ -27,7 +27,7 @@
 </p>
 
 <p align="center">
-  <b>Beta 测试版：</b><a href="https://github.com/ShunmeiCho/cc-clip/releases/tag/v0.9.0-beta.1">v0.9.0-beta.1</a>（opt-in 预发布）—— 支持 Claude / Codex / opencode / Antigravity 各目标的安装，并新增 opencode 与 Antigravity 通知。<a href="https://github.com/ShunmeiCho/cc-clip/releases/tag/v0.9.0-beta.1">发布说明与安装 →</a>
+  <b>Beta 测试版：</b><a href="https://github.com/ShunmeiCho/cc-clip/releases/tag/v0.9.0-beta.2">v0.9.0-beta.2</a>（opt-in 预发布）—— 支持 Claude / Codex / opencode / Antigravity 各目标的安装，并新增 opencode 与 Antigravity 通知。<a href="https://github.com/ShunmeiCho/cc-clip/releases/tag/v0.9.0-beta.2">发布说明与安装 →</a>
 </p>
 
 > 这是英文 README 的简体中文翻译。如果翻译版与 [English README](README.md) 存在差异，以英文原版为准。翻译版本可能晚于英文主线更新。
@@ -43,7 +43,7 @@
 - [解决方案](#解决方案)
 - [前置条件](#前置条件)
 - [快速开始](#快速开始)
-- [Beta 快速开始（opt-in：v0.9.0-beta.1）](#beta-快速开始opt-inv090-beta1)
+- [Beta 快速开始（opt-in：v0.9.0-beta.2）](#beta-快速开始opt-inv090-beta2)
 - [为什么选择 cc-clip？](#为什么选择-cc-clip)
 - [工作原理](#工作原理)
 - [SSH 通知](#ssh-通知)
@@ -258,17 +258,17 @@ Windows 上的等价快速检查见：
 
 - [Windows Quick Start](docs/windows-quickstart.md)
 
-## Beta 快速开始（opt-in：v0.9.0-beta.1）
+## Beta 快速开始（opt-in：v0.9.0-beta.2）
 
-上面的主快速开始面向稳定版 v0.8.1；v0.9.0-beta.1 预发布版新增了按目标分别安装，以及 opencode 与 Antigravity 通知；它是 opt-in 的，因为默认安装脚本只给你稳定版。
+上面的主快速开始面向稳定版 v0.8.1；v0.9.0-beta.2 预发布版新增了按目标分别安装，以及 opencode 与 Antigravity 通知；它是 opt-in 的，因为默认安装脚本只给你稳定版。
 
 ### 第 1 步：安装 beta 版
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ShunmeiCho/cc-clip/main/scripts/install.sh | CC_CLIP_VERSION=v0.9.0-beta.1 sh
+curl -fsSL https://raw.githubusercontent.com/ShunmeiCho/cc-clip/main/scripts/install.sh | CC_CLIP_VERSION=v0.9.0-beta.2 sh
 ```
 
-随后运行 `cc-clip --version` 应报告 `v0.9.0-beta.1`。
+随后运行 `cc-clip --version` 应报告 `v0.9.0-beta.2`。
 
 ### 第 2 步：按目标初始化
 

@@ -27,7 +27,7 @@
 </p>
 
 <p align="center">
-  <b>Beta（テスト版）：</b><a href="https://github.com/ShunmeiCho/cc-clip/releases/tag/v0.9.0-beta.1">v0.9.0-beta.1</a>（opt-in プレリリース）—— Claude / Codex / opencode / Antigravity の各ターゲットのセットアップに加え、opencode・Antigravity 通知。<a href="https://github.com/ShunmeiCho/cc-clip/releases/tag/v0.9.0-beta.1">リリースノートとインストール →</a>
+  <b>Beta（テスト版）：</b><a href="https://github.com/ShunmeiCho/cc-clip/releases/tag/v0.9.0-beta.2">v0.9.0-beta.2</a>（opt-in プレリリース）—— Claude / Codex / opencode / Antigravity の各ターゲットのセットアップに加え、opencode・Antigravity 通知。<a href="https://github.com/ShunmeiCho/cc-clip/releases/tag/v0.9.0-beta.2">リリースノートとインストール →</a>
 </p>
 
 > これは英語版 README の日本語訳です。内容に差異がある場合は [English README](README.md) を正とします。この翻訳は英語版のメインラインより遅れている場合があります。
@@ -43,7 +43,7 @@
 - [解決策](#解決策)
 - [前提条件](#前提条件)
 - [クイックスタート](#クイックスタート)
-- [ベータクイックスタート（opt-in: v0.9.0-beta.1）](#ベータクイックスタートopt-in-v090-beta1)
+- [ベータクイックスタート（opt-in: v0.9.0-beta.2）](#ベータクイックスタートopt-in-v090-beta2)
 - [なぜ cc-clip か](#なぜ-cc-clip-か)
 - [仕組み](#仕組み)
 - [SSH 通知](#ssh-通知)
@@ -258,17 +258,17 @@ Windows での同等のクイックチェックはこちらです。
 
 - [Windows Quick Start](docs/windows-quickstart.md)
 
-## ベータクイックスタート（opt-in: v0.9.0-beta.1）
+## ベータクイックスタート（opt-in: v0.9.0-beta.2）
 
-上のメインのクイックスタートは安定版 v0.8.1 を対象としています。v0.9.0-beta.1 プレリリースは、ターゲットごとのセットアップに加えて opencode・Antigravity 通知を追加します。デフォルトのインストーラーは安定版を入れるため、これは opt-in です。
+上のメインのクイックスタートは安定版 v0.8.1 を対象としています。v0.9.0-beta.2 プレリリースは、ターゲットごとのセットアップに加えて opencode・Antigravity 通知を追加します。デフォルトのインストーラーは安定版を入れるため、これは opt-in です。
 
 ### Step 1: ベータ版をインストールする
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ShunmeiCho/cc-clip/main/scripts/install.sh | CC_CLIP_VERSION=v0.9.0-beta.1 sh
+curl -fsSL https://raw.githubusercontent.com/ShunmeiCho/cc-clip/main/scripts/install.sh | CC_CLIP_VERSION=v0.9.0-beta.2 sh
 ```
 
-その後 `cc-clip --version` を実行すると、`v0.9.0-beta.1` と表示されるはずです。
+その後 `cc-clip --version` を実行すると、`v0.9.0-beta.2` と表示されるはずです。
 
 ### Step 2: ターゲットごとにセットアップする
 

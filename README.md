@@ -25,7 +25,7 @@
 </p>
 
 <p align="center">
-  <b>Beta available:</b> <a href="https://github.com/ShunmeiCho/cc-clip/releases/tag/v0.9.0-beta.1">v0.9.0-beta.1</a> (opt-in prerelease) — setup targets for Claude / Codex / opencode / Antigravity, plus opencode &amp; Antigravity notifications. <a href="https://github.com/ShunmeiCho/cc-clip/releases/tag/v0.9.0-beta.1">Release notes &amp; install →</a>
+  <b>Beta available:</b> <a href="https://github.com/ShunmeiCho/cc-clip/releases/tag/v0.9.0-beta.2">v0.9.0-beta.2</a> (opt-in prerelease) — setup targets for Claude / Codex / opencode / Antigravity, plus opencode &amp; Antigravity notifications. <a href="https://github.com/ShunmeiCho/cc-clip/releases/tag/v0.9.0-beta.2">Release notes &amp; install →</a>
 </p>
 
 ---
@@ -37,7 +37,7 @@
 - [The Solution](#the-solution)
 - [Prerequisites](#prerequisites)
 - [Quick Start](#quick-start)
-- [Beta Quick Start (opt-in: v0.9.0-beta.1)](#beta-quick-start-opt-in-v090-beta1)
+- [Beta Quick Start (opt-in: v0.9.0-beta.2)](#beta-quick-start-opt-in-v090-beta2)
 - [Why cc-clip?](#why-cc-clip)
 - [How It Works](#how-it-works)
 - [SSH Notifications](#ssh-notifications)
@@ -255,17 +255,17 @@ On Windows, the equivalent quick check is:
 
 - [Windows Quick Start](docs/windows-quickstart.md)
 
-## Beta Quick Start (opt-in: v0.9.0-beta.1)
+## Beta Quick Start (opt-in: v0.9.0-beta.2)
 
-The Quick Start above targets the current **stable** release (v0.8.1) — that is what the default installer gives you. The **v0.9.0-beta.1** prerelease adds per-target setup (Claude / Codex / opencode / Antigravity) plus opencode and Antigravity notifications. It is opt-in.
+The Quick Start above targets the current **stable** release (v0.8.1) — that is what the default installer gives you. The **v0.9.0-beta.2** prerelease adds per-target setup (Claude / Codex / opencode / Antigravity) plus opencode and Antigravity notifications. It is opt-in.
 
 ### Install the beta
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ShunmeiCho/cc-clip/main/scripts/install.sh | CC_CLIP_VERSION=v0.9.0-beta.1 sh
+curl -fsSL https://raw.githubusercontent.com/ShunmeiCho/cc-clip/main/scripts/install.sh | CC_CLIP_VERSION=v0.9.0-beta.2 sh
 ```
 
-`cc-clip --version` should then report `v0.9.0-beta.1`.
+`cc-clip --version` should then report `v0.9.0-beta.2`.
 
 ### Setup — pick your target(s)
 
