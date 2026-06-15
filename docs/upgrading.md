@@ -35,6 +35,31 @@ new binary:
 The remote update is driven from your local machine via
 `cc-clip connect <host>`. You do not SSH in and upgrade remotely by hand.
 
+## Upgrading from v0.8.x to v0.9.0
+
+v0.9.0 introduces **per-target setup**. One behavior change matters when you
+upgrade an existing host:
+
+- **`--codex` is now Codex-only.** In v0.8.x, `cc-clip connect <host> --codex`
+  installed Codex support **on top of** the Claude shim. In v0.9.0 it installs
+  **Codex only** (Xvfb + x11-bridge, no Claude shim). If you used `--codex` to
+  get both, switch to `--all`:
+
+    ```sh
+    # v0.8.x (old): --codex meant Claude shim + Codex
+    cc-clip connect myserver --codex --force
+    # v0.9.0 (new): use --all for the same Claude + Codex result
+    cc-clip connect myserver --all --force
+    ```
+
+- **New targets:** `--opencode`, `--agy` (Antigravity), and an explicit
+  `--claude`. `--all` selects every target.
+
+Otherwise the upgrade is the normal forward path below: update the local binary,
+then redeploy each remote with `--force`. Downgrading back across the v0.9.0
+boundary is **not lossless** — see
+[Cross-v0.9 downgrade](#cross-v09-downgrade-pre-v090) first.
+
 ## macOS / Linux upgrade
 
 ### Option A: `cc-clip update` (recommended, cc-clip 0.6.2+)

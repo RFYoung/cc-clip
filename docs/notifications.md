@@ -22,14 +22,16 @@ Image paste notifications help you track what was pasted without leaving your wo
 
 ## Coverage by CLI
 
-> **Version note:** This reference documents the latest code (v0.9.0-beta.2). On the current stable release (v0.8.1, what the default installer gives you), the only setup/connect target flag is `--codex`, and it adds Codex support on top of the Claude shim. The per-target flags below (`--all`, `--opencode`, `--agy`, `--claude`, and `--codex` as Codex-only) require the v0.9.0-beta.2 prerelease — install it with `CC_CLIP_VERSION=v0.9.0-beta.2`.
+> **Version note:** Per-target flags (`--all`, `--opencode`, `--agy`, `--claude`, and `--codex` as Codex-only) are available in **v0.9.0+**. On v0.8.x, the only target flag was `--codex` (Codex on top of the Claude shim). See [Upgrading from v0.8.x to v0.9.0](upgrading.md#upgrading-from-v08x-to-v090).
 
-| CLI | Auto-configured by `cc-clip connect`? | How |
-|-----|----------------------------------------|-----|
-| Claude Code | ✅ Managed hooks in `~/.claude/settings.json` | Wired during `cc-clip connect` |
-| Codex CLI | ✅ If a Codex target (`--codex`/`--all`) is selected and `~/.codex/` exists | Wired during `cc-clip connect` |
-| opencode | ✅ Plugin dropped into `~/.config/opencode/plugins/` if `opencode` is installed | Wired during `cc-clip connect` when an opencode target (`--opencode`/`--all`) is selected |
-| Antigravity (agy) | ✅ `agy-notify` plugin installed via the `agy` CLI if `agy` is installed | Wired during `cc-clip connect` when an Antigravity target (`--agy`/`--all`) is selected |
+| CLI | Wired by `cc-clip connect`? | How |
+|-----|----------------------------|-----|
+| Claude Code | ✅ Yes | Managed Stop/Notification hooks merged into `~/.claude/settings.json` |
+| Codex CLI | ✅ If a Codex target (`--codex`/`--all`) is selected and `~/.codex/` exists | `notify` written into `~/.codex/config.toml` (a pre-existing top-level `notify` is left untouched) |
+| opencode | ✅ If an opencode target (`--opencode`/`--all`) is selected and opencode is detected ¹ | Plugin dropped into `~/.config/opencode/plugins/` |
+| Antigravity (agy) | ✅ If an Antigravity target (`--agy`/`--all`) is selected and agy is detected ¹ | `agy-notify` plugin installed via the `agy` CLI |
+
+¹ "Wired" means `cc-clip connect` installs the integration. Plugin generation and runner paths are covered by tests, but host event delivery for opencode and Antigravity has not yet been smoke-verified on a representative host — please report issues.
 
 ## Setup (Claude Code)
 
@@ -86,7 +88,7 @@ new entry to the array.
 
 ### Step 3 (Codex only): no manual work
 
-Codex notification is auto-configured by `cc-clip connect` if `~/.codex/` exists on the remote.
+Codex notifications are wired by `cc-clip connect` when a Codex target (`--codex`/`--all`) is selected and `~/.codex/` exists on the remote. If your `~/.codex/config.toml` already has a top-level `notify` setting, cc-clip leaves it untouched to avoid clobbering your config — remove it, or use `[agents.X].notify`, to let cc-clip manage Codex notifications.
 
 ### Step 4: Register the notification nonce (if you haven't used `cc-clip connect`)
 

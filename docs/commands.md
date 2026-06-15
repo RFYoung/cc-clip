@@ -14,7 +14,7 @@ Complete cc-clip command reference. For the 10 most common commands, see the [Co
 
 ## Setup and deploy
 
-> **Version note:** This reference documents the latest code (v0.9.0-beta.2). On the current stable release (v0.8.1, what the default installer gives you), the only setup/connect target flag is `--codex`, and it adds Codex support **on top of** the Claude shim. The per-target flags below (`--all`, `--opencode`, `--agy`, `--claude`, and `--codex` as Codex-only) require the v0.9.0-beta.2 prerelease — install it with `CC_CLIP_VERSION=v0.9.0-beta.2`.
+> **Version note:** Per-target flags (`--all`, `--opencode`, `--agy`, `--claude`, and `--codex` as Codex-only) are available in **v0.9.0+**. On v0.8.x, the only target flag was `--codex`, and it added Codex support **on top of** the Claude shim. See [Upgrading from v0.8.x to v0.9.0](upgrading.md#upgrading-from-v08x-to-v090).
 
 | Command | Description |
 |---------|-------------|
